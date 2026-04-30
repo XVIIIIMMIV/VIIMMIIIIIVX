@@ -220,7 +220,7 @@ local Templates = {
         UnlockMouseWhileOpen = true,
         Icon = "rbxassetid://86720583626882",
 
-        EnableSidebarResize = true,
+        EnableSidebarResize = false,
         EnableCompacting = true,
         DisableCompactingSnap = false,
         SidebarCompacted = true,
@@ -291,7 +291,7 @@ local Templates = {
         Values = {},
         DisabledValues = {},
         Multi = false,
-        MaxVisibleDropdownItems = 8,
+        MaxVisibleDropdownItems = 5,
 
         Callback = function() end,
         Changed = function() end,
@@ -1622,6 +1622,73 @@ function Library:GetTextBounds(Text: string, Font: Font, Size: number, Width: nu
 
     local Bounds = TextService:GetTextBoundsAsync(Params)
     return Bounds.X, Bounds.Y
+end
+
+function Library:ResolveSelectionMap(selection, displayMap)
+    if type(selection) ~= "table" then
+        return {}
+    end
+
+    local resolved = {}
+    local map = type(displayMap) == "table" and displayMap or {}
+
+    local function resolveOne(entry)
+        if type(entry) ~= "string" then
+            return entry
+        end
+
+        local mapped = map[entry]
+        if mapped then
+            return mapped
+        end
+
+        local stripped = entry:match("^(.-)%s*%[[^%]]+%]$")
+        if stripped and stripped ~= "" then
+            return map[stripped] or stripped
+        end
+
+        return entry
+    end
+
+    for key, value in pairs(selection) do
+        if type(key) == "number" and type(value) == "string" then
+            resolved[resolveOne(value)] = true
+        elseif value == true then
+            resolved[resolveOne(key)] = true
+        elseif type(key) == "string" then
+            resolved[resolveOne(key)] = value
+        end
+    end
+
+    return resolved
+end
+
+function Library:HasAnyEnabledSelection(selection)
+    if type(selection) ~= "table" then
+        return false
+    end
+
+    for _, enabled in pairs(selection) do
+        if enabled then
+            return true
+        end
+    end
+
+    return false
+end
+
+function Library:RefreshElementLayout(Groupbox, Holder, Visible)
+    if Holder and Visible ~= nil then
+        Holder.Visible = Visible
+    end
+    if Groupbox and Groupbox.Resize then
+        Groupbox:Resize()
+        task.defer(function()
+            if Groupbox and Groupbox.Resize then
+                Groupbox:Resize()
+            end
+        end)
+    end
 end
 
 function Library:MouseIsOverFrame(Frame: GuiObject, Mouse: Vector2): boolean
@@ -3626,6 +3693,7 @@ do
 
             Callback = Info.Callback,
             Changed = Info.Changed,
+            Released = Info.Released,
 
             Risky = Info.Risky,
             Disabled = Info.Disabled,
@@ -4042,10 +4110,6 @@ do
     end
 
     function Funcs:AddInput(Idx, Info)
-        if typeof(Info) == "table" and (typeof(Info.VerifyValue) == "function" and Info.Finished ~= true) then
-            Info.Finished = true
-        end
-
         Info = Library:Validate(Info, Templates.Input)
 
         local Groupbox = self
@@ -4138,6 +4202,15 @@ do
             Box.TextTransparency = Input.Disabled and 0.8 or 0
         end
 
+        function Input:RefreshLayout()
+            local hasLabel = type(Input.Text) == "string" and Input.Text ~= ""
+            Holder.Size = UDim2.new(1, 0, 0, hasLabel and 39 or 21)
+            Label.Visible = hasLabel
+            Box.AnchorPoint = hasLabel and Vector2.new(0, 1) or Vector2.new(0, 0)
+            Box.Position = hasLabel and UDim2.fromScale(0, 1) or UDim2.fromOffset(0, 0)
+            Library:RefreshElementLayout(Groupbox)
+        end
+
         function Input:OnChanged(Func)
             Input.Changed = Func
         end
@@ -4186,15 +4259,13 @@ do
 
         function Input:SetVisible(Visible: boolean)
             Input.Visible = Visible
-
-            Holder.Visible = Input.Visible
-            Groupbox:Resize()
-            task.defer(function() Groupbox:Resize() end)
+            Library:RefreshElementLayout(Groupbox, Holder, Input.Visible)
         end
 
         function Input:SetText(Text: string)
             Input.Text = Text
             Label.Text = Text
+            Input:RefreshLayout()
         end
 
         if Input.Finished then
@@ -4223,6 +4294,7 @@ do
         end
 
         Groupbox:Resize()
+        Input:RefreshLayout()
 
         Input.Holder = Holder
         table.insert(Groupbox.Elements, Input)
@@ -4400,6 +4472,10 @@ do
             Slider.Changed = Func
         end
 
+        function Slider:OnReleased(Func)
+            Slider.Released = Func
+        end
+
         function Slider:SetMax(Value)
             assert(Value > Slider.Min, "Max value cannot be less than the current min value.")
 
@@ -4458,10 +4534,7 @@ do
 
         function Slider:SetVisible(Visible: boolean)
             Slider.Visible = Visible
-
-            Holder.Visible = Slider.Visible
-            Groupbox:Resize()
-            task.defer(function() Groupbox:Resize() end)
+            Library:RefreshElementLayout(Groupbox, Holder, Slider.Visible)
         end
 
         function Slider:SetText(Text: string)
@@ -4489,23 +4562,33 @@ do
             end
 
             local Tab = Library.ActiveTab
+            local DragChanged = false
+            local function ApplyMouseValue()
+                local OldValue = Slider.Value
+                local Location = Mouse.X
+                local Scale = math.clamp((Location - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+
+                local RawValue = Slider.Min + ((Slider.Max - Slider.Min) * Scale)
+                if Slider.Increment and Slider.Increment > 0 then
+                    RawValue = math.round((RawValue - Slider.Min) / Slider.Increment) * Slider.Increment + Slider.Min
+                    RawValue = math.clamp(RawValue, Slider.Min, Slider.Max)
+                end
+
+                Slider:SetValue(RawValue)
+                if Slider.Value ~= OldValue then
+                    DragChanged = true
+                end
+            end
             if Tab and Tab.Sides then
                 for _, Side in Tab.Sides do
                     Side.ScrollingEnabled = false
                 end
             end
 
-            while IsDragInput(Input) do
-                local Location = Mouse.X
-                local Scale = math.clamp((Location - Bar.AbsolutePosition.X) / Bar.AbsoluteSize.X, 0, 1)
+            ApplyMouseValue()
 
-                local OldValue = Slider.Value
-                local RawValue = Slider.Min + ((Slider.Max - Slider.Min) * Scale)
-                if Slider.Increment and Slider.Increment > 0 then
-                    RawValue = math.round((RawValue - Slider.Min) / Slider.Increment) * Slider.Increment + Slider.Min
-                    RawValue = math.clamp(RawValue, Slider.Min, Slider.Max)
-                end
-                Slider:SetValue(RawValue)
+            while IsDragInput(Input) do
+                ApplyMouseValue()
 
                 RunService.RenderStepped:Wait()
             end
@@ -4514,6 +4597,10 @@ do
                 for _, Side in Tab.Sides do
                     Side.ScrollingEnabled = true
                 end
+            end
+
+            if DragChanged then
+                Library:SafeCallback(Slider.Released, Slider.Value)
             end
         end)
 
@@ -9184,5 +9271,3 @@ if not libraryChunkOk then
 end
 
 return if libraryChunkOk then libraryChunkResult else nil
-
-
