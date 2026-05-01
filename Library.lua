@@ -124,6 +124,7 @@ local Library = {
         AccentColor = Color3.fromHex("ffffff"),
         ToggleColor = Color3.fromHex("ffff00"),
         SliderColor = Color3.fromHex("ffff00"),
+        TabIndicatorColor = Color3.fromHex("ffff00"),
         OutlineColor = Color3.fromRGB(40, 40, 40),
         FontColor = Color3.new(1, 1, 1),
         Font = Font.fromEnum(Enum.Font.Code),
@@ -171,12 +172,14 @@ local Templates = {
         BorderSizePixel = 0,
     },
     TextLabel = {
+        AutoLocalize = false,
         BorderSizePixel = 0,
         FontFace = "Font",
         RichText = true,
         TextColor3 = "FontColor",
     },
     TextButton = {
+        AutoLocalize = false,
         AutoButtonColor = false,
         BorderSizePixel = 0,
         FontFace = "Font",
@@ -184,6 +187,7 @@ local Templates = {
         TextColor3 = "FontColor",
     },
     TextBox = {
+        AutoLocalize = false,
         BorderSizePixel = 0,
         FontFace = "Font",
         PlaceholderColor3 = function()
@@ -238,9 +242,20 @@ local Templates = {
     Dialog = {
         Title = "Dialog",
         Description = "Description",
+        Icon = nil,
+        TitleColor = nil,
+        DescriptionColor = nil,
+        Width = nil,
+        MaxHeight = nil,
+        StartHidden = false,
+        AutoDestroy = false,
         AutoDismiss = true,
         OutsideClickDismiss = true,
-        FooterButtons = {}
+        ButtonsSide = "Right",
+        FooterButtons = {},
+        OnDismiss = nil,
+        OnDestroy = nil,
+        OnShow = nil,
     },
     Toggle = {
         Text = "Toggle",
@@ -7333,7 +7348,7 @@ function Library:CreateWindow(WindowInfo)
         })
 
         CurrentTabInfo = New("Frame", {
-            Size = UDim2.fromScale(WindowInfo.DisableSearch and 1 or 0.5, 1),
+            Size = UDim2.fromScale(WindowInfo.DisableSearch and 1 or 0.536, 1),
             Visible = false,
             BackgroundTransparency = 1,
             Parent = RightWrapper,
@@ -7364,7 +7379,7 @@ function Library:CreateWindow(WindowInfo)
             Size = UDim2.fromScale(1, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
             Text = "",
-            TextSize = 14,
+            TextSize = 18,
             TextXAlignment = Enum.TextXAlignment.Left,
             Parent = CurrentTabInfo,
         })
@@ -7378,6 +7393,7 @@ function Library:CreateWindow(WindowInfo)
             TextSize = 14,
             TextXAlignment = Enum.TextXAlignment.Left,
             TextTransparency = 0.5,
+            Visible = false,
             Parent = CurrentTabInfo,
         })
 
@@ -7844,10 +7860,10 @@ function Library:CreateWindow(WindowInfo)
 
     function Window:ShowTabInfo(Name, Description)
         CurrentTabLabel.Text = Name
-        CurrentTabDescription.Text = Description
+        CurrentTabDescription.Text = ""
 
         if IsDefaultSearchbarSize then
-            SearchBox.Size = UDim2.fromScale(0.5, 1)
+            SearchBox.Size = UDim2.fromScale(0.464, 1)
         end
         CurrentTabInfo.Visible = true
     end
@@ -8481,6 +8497,16 @@ function Library:CreateWindow(WindowInfo)
                     Parent = TabboxButtons,
                 })
 
+                local Indicator = New("Frame", {
+                    AnchorPoint = Vector2.new(0.5, 1),
+                    BackgroundColor3 = "TabIndicatorColor",
+                    BackgroundTransparency = 1,
+                    BorderSizePixel = 0,
+                    Position = UDim2.new(0.5, 0, 1, 0),
+                    Size = UDim2.new(0.6, 0, 0, 2),
+                    Parent = Button,
+                })
+
                 table.insert(
                     Library.Corners,
                     New("UICorner", {
@@ -8596,6 +8622,7 @@ function Library:CreateWindow(WindowInfo)
                         LeftCover = LeftCover,
                         RightCover = RightCover
                     },
+                    Indicator = Indicator,
 
                     Tab = Tab,
                     Elements = {},
@@ -8616,6 +8643,9 @@ function Library:CreateWindow(WindowInfo)
                     if ButtonIcon then
                         ButtonIcon.ImageTransparency = 0
                     end
+                    TweenService:Create(Indicator, Library.TweenInfo, {
+                        BackgroundTransparency = 0,
+                    }):Play()
                     Line.Visible = false
 
                     Tabbox.ActiveTab = Tab
@@ -8642,6 +8672,9 @@ function Library:CreateWindow(WindowInfo)
                     if ButtonIcon then
                         ButtonIcon.ImageTransparency = 0.5
                     end
+                    TweenService:Create(Indicator, Library.TweenInfo, {
+                        BackgroundTransparency = 1,
+                    }):Play()
                     Line.Visible = true
                     Container.Visible = false
                     --// Removed TabboxHolder immediately resize to prevent layout jumping/flickering
@@ -8879,10 +8912,7 @@ function Library:CreateWindow(WindowInfo)
                     ImageTransparency = 0,
                 }):Play()
             end
-
-            if Description then
-                Window:ShowTabInfo(Name, Description)
-            end
+            Window:ShowTabInfo(Name, Description)
 
             TabContainer.Visible = true
             Tab:RefreshSides()
@@ -9184,9 +9214,7 @@ function Library:CreateWindow(WindowInfo)
             end
             TabContainer.Visible = true
 
-            if Description then
-                Window:ShowTabInfo(Name, Description)
-            end
+            Window:ShowTabInfo(Name, Description)
 
             Tab:RefreshSides()
 
@@ -9286,6 +9314,9 @@ function Library:CreateWindow(WindowInfo)
         local DialogContainer
         local ButtonsHolder
         local FooterButtonsList = {}
+        local DialogScale
+        local DialogDestroyed = false
+        local DialogVisible = not Info.StartHidden
 
         if Window.ActiveDialog then
             Window.ActiveDialog:Dismiss()
@@ -9299,18 +9330,20 @@ function Library:CreateWindow(WindowInfo)
             Text = "",
             Active = false,
             ZIndex = 9000,
-            Visible = true,
+            Visible = DialogVisible,
             Parent = MainFrame,
         })
-        TweenService:Create(DialogOverlay, Library.TweenInfo, {
-            BackgroundTransparency = 0.5,
-        }):Play()
+        if DialogVisible then
+            TweenService:Create(DialogOverlay, Library.TweenInfo, {
+                BackgroundTransparency = 0.5,
+            }):Play()
+        end
 
         DialogFrame = New("TextButton", {
             AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundColor3 = "BackgroundColor",
             Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.fromOffset(300, 0),
+            Size = UDim2.fromOffset(Info.Width or 300, 0),
             AutomaticSize = Enum.AutomaticSize.Y,
             Text = "",
             AutoButtonColor = false,
@@ -9333,13 +9366,15 @@ function Library:CreateWindow(WindowInfo)
             ZIndex = 9002,
             Parent = DialogFrame,
         })
-        local DialogScale = New("UIScale", {
+        DialogScale = New("UIScale", {
             Scale = Library.DPIScale * 0.95,
             Parent = DialogFrame,
         })
-        TweenService:Create(DialogScale, Library.TweenInfo, {
-            Scale = Library.DPIScale
-        }):Play()
+        if DialogVisible then
+            TweenService:Create(DialogScale, Library.TweenInfo, {
+                Scale = Library.DPIScale
+            }):Play()
+        end
         local _InnerPadding = New("UIPadding", {
             PaddingBottom = UDim.new(0, 15),
             PaddingLeft = UDim.new(0, 15),
@@ -9478,7 +9513,7 @@ function Library:CreateWindow(WindowInfo)
         New("UIListLayout", {
             Padding = UDim.new(0, 8),
             FillDirection = Enum.FillDirection.Horizontal,
-            HorizontalAlignment = Enum.HorizontalAlignment.Right,
+            HorizontalAlignment = Info.ButtonsSide == "Left" and Enum.HorizontalAlignment.Left or Enum.HorizontalAlignment.Right,
             Wraps = true,
             SortOrder = Enum.SortOrder.LayoutOrder,
             Parent = ButtonsHolder,
@@ -9492,6 +9527,9 @@ function Library:CreateWindow(WindowInfo)
             Elements = {},
             Container = DialogContainer,
             Window = Window,
+            Visible = DialogVisible,
+            Destroyed = false,
+            FooterButtons = FooterButtonsList,
         }
 
         function Dialog:Resize()
@@ -9508,10 +9546,12 @@ function Library:CreateWindow(WindowInfo)
                 TotalButtonWidth = TotalButtonWidth + BtnWrap.Container.Size.X.Offset
             end
 
-            local TargetWidth = MinWidth
-            if HasButtons then
+            local TargetWidth = Info.Width or MinWidth
+            if not Info.Width and HasButtons then
                 local RequiredWidth = TotalButtonWidth + ((ButtonCount - 1) * 8) + 30
                 TargetWidth = math.max(MinWidth, math.min(RequiredWidth, MaxWidth))
+            elseif Info.Width then
+                TargetWidth = math.min(math.max(Info.Width, 280), MaxWidth)
             end
 
             DialogFrame.Size = UDim2.fromOffset(TargetWidth, 0)
@@ -9542,34 +9582,114 @@ function Library:CreateWindow(WindowInfo)
             Dialog:Resize()
         end
 
-        function Dialog:Dismiss()
-            if Dialog.Destroyed then
+        function Dialog:SetSize(Width, MaxHeight)
+            if type(Width) == "number" then
+                Info.Width = Width
+            end
+            if type(MaxHeight) == "number" then
+                Info.MaxHeight = MaxHeight
+            end
+            Dialog:Resize()
+        end
+
+        function Dialog:IsVisible()
+            return Dialog.Visible == true
+        end
+
+        function Dialog:Show()
+            if DialogDestroyed or Dialog.Visible then
                 return
             end
 
-            Dialog.Destroyed = true
+            if Window.ActiveDialog and Window.ActiveDialog ~= Dialog then
+                Window.ActiveDialog:Dismiss()
+            end
+
+            Dialog.Visible = true
+            Window.ActiveDialog = Dialog
+            Library.ActiveDialog = Dialog
+            DialogOverlay.Visible = true
+            DialogOverlay.BackgroundTransparency = 1
+            DialogScale.Scale = Library.DPIScale * 0.95
+
+            TweenService:Create(DialogOverlay, Library.TweenInfo, {
+                BackgroundTransparency = 0.5,
+            }):Play()
+            TweenService:Create(DialogScale, Library.TweenInfo, {
+                Scale = Library.DPIScale
+            }):Play()
+
+            if Info.OnShow then
+                Library:SafeCallback(Info.OnShow, Dialog)
+            end
+        end
+
+        function Dialog:Dismiss()
+            if DialogDestroyed or not Dialog.Visible then
+                return
+            end
+
+            Dialog.Visible = false
             if Window.ActiveDialog == Dialog then
                 Window.ActiveDialog = nil
             end
             if Library.ActiveDialog == Dialog then
                 Library.ActiveDialog = nil
             end
-            for buttonIdx in pairs(FooterButtonsList) do
-                Dialog:RemoveFooterButton(buttonIdx)
-            end
             local CloseTween = TweenService:Create(DialogScale, Library.TweenInfo, { Scale = 0.95 })
             TweenService:Create(DialogOverlay, Library.TweenInfo, { BackgroundTransparency = 1 }):Play()
             CloseTween:Play()
             
             task.delay(Library.TweenInfo.Time, function()
-                DialogOverlay:Destroy()
+                if DialogDestroyed then
+                    return
+                end
+                DialogOverlay.Visible = false
             end)
-            Window.Dialogues[Idx] = nil
-            Library.Dialogues[Idx] = nil
+
+            if Info.OnDismiss then
+                Library:SafeCallback(Info.OnDismiss, Dialog)
+            end
+
+            if Info.AutoDestroy then
+                task.delay(Library.TweenInfo.Time, function()
+                    if not DialogDestroyed then
+                        Dialog:Destroy()
+                    end
+                end)
+            end
         end
 
         function Dialog:Destroy()
-            Dialog:Dismiss()
+            if DialogDestroyed then
+                return
+            end
+
+            DialogDestroyed = true
+            Dialog.Destroyed = true
+            Dialog.Visible = false
+
+            if Window.ActiveDialog == Dialog then
+                Window.ActiveDialog = nil
+            end
+            if Library.ActiveDialog == Dialog then
+                Library.ActiveDialog = nil
+            end
+
+            for buttonIdx in pairs(FooterButtonsList) do
+                Dialog:RemoveFooterButton(buttonIdx)
+            end
+
+            if Info.OnDestroy then
+                Library:SafeCallback(Info.OnDestroy, Dialog)
+            end
+
+            Window.Dialogues[Idx] = nil
+            Library.Dialogues[Idx] = nil
+
+            if DialogOverlay and DialogOverlay.Parent then
+                DialogOverlay:Destroy()
+            end
         end
 
         DialogOverlay.MouseButton1Click:Connect(function()
@@ -9582,6 +9702,7 @@ function Library:CreateWindow(WindowInfo)
             if FooterButtonsList[ButtonIdx] then
                 FooterButtonsList[ButtonIdx].Container:Destroy()
                 FooterButtonsList[ButtonIdx] = nil
+                Dialog:Resize()
             end
         end
 
@@ -9589,6 +9710,34 @@ function Library:CreateWindow(WindowInfo)
             if FooterButtonsList[ButtonIdx] and type(FooterButtonsList[ButtonIdx].SetDisabled) == "function" then
                 FooterButtonsList[ButtonIdx]:SetDisabled(Disabled)
             end
+        end
+
+        function Dialog:SetButtonVariant(ButtonIdx, NewVariant)
+            local BtnWrap = FooterButtonsList[ButtonIdx]
+            if not BtnWrap then
+                return
+            end
+
+            local BtnColor = Library.Scheme.MainColor
+            local TextColor = Library.Scheme.FontColor
+
+            if NewVariant == "Primary" then
+                BtnColor = Library.Scheme.FontColor
+                TextColor = Library.Scheme.BackgroundColor
+            elseif NewVariant == "Secondary" then
+                BtnColor = Library.Scheme.MainColor
+            elseif NewVariant == "Destructive" then
+                BtnColor = Color3.fromRGB(220, 38, 38)
+                TextColor = Color3.new(1, 1, 1)
+            elseif NewVariant == "Ghost" then
+                BtnColor = Library.Scheme.BackgroundColor
+            end
+
+            BtnWrap.Variant = NewVariant
+            BtnWrap.ActiveColor = BtnColor
+            BtnWrap.HoverColor = NewVariant == "Ghost" and Library.Scheme.MainColor or Library:GetBetterColor(BtnColor, 10)
+            BtnWrap.TextBtn.BackgroundColor3 = BtnColor
+            BtnWrap.Label.TextColor3 = TextColor
         end
 
         function Dialog:SetButtonOrder(ButtonIdx, Order)
@@ -9698,6 +9847,11 @@ function Library:CreateWindow(WindowInfo)
 
             local ButtonWrap = {
                 Container = ButtonContainer,
+                TextBtn = TextBtn,
+                Label = BtnLabel,
+                Variant = Variant,
+                ActiveColor = ActiveColor,
+                HoverColor = HoverColor,
                 SetDisabled = function(self, Disabled)
                     IsActive = not Disabled
                     if Disabled then
@@ -9716,13 +9870,13 @@ function Library:CreateWindow(WindowInfo)
             TextBtn.MouseEnter:Connect(function()
                 if not IsActive then return end
                 TweenService:Create(TextBtn, Library.TweenInfo, {
-                    BackgroundColor3 = HoverColor
+                    BackgroundColor3 = ButtonWrap.HoverColor
                 }):Play()
             end)
             TextBtn.MouseLeave:Connect(function()
                 if not IsActive then return end
                 TweenService:Create(TextBtn, Library.TweenInfo, {
-                    BackgroundColor3 = ActiveColor
+                    BackgroundColor3 = ButtonWrap.ActiveColor
                 }):Play()
             end)
 
@@ -9752,6 +9906,10 @@ function Library:CreateWindow(WindowInfo)
             end
 
             FooterButtonsList[ButtonIdx] = ButtonWrap
+            if ButtonInfo.Disabled then
+                ButtonWrap:SetDisabled(true)
+            end
+            Dialog:Resize()
         end
 
         for BIdx, BInfo in Info.FooterButtons do
@@ -9765,8 +9923,13 @@ function Library:CreateWindow(WindowInfo)
 
         Dialog:Resize()
         
-        Window.ActiveDialog = Dialog
-        Library.ActiveDialog = Dialog
+        if DialogVisible then
+            Window.ActiveDialog = Dialog
+            Library.ActiveDialog = Dialog
+        end
+        if not DialogVisible then
+            DialogOverlay.Visible = false
+        end
         return Dialog
     end
 
@@ -10036,7 +10199,7 @@ function Library:BuildConfigPanel(settingsTab, saveManager, options)
     assert(type(saveManager) == "table", "saveManager must be a table")
 
     local panelOptions = type(options) == "table" and options or {}
-    local boxName = panelOptions.Name or "Configuration"
+    local boxName = panelOptions.Name or "Settings"
     local boxIcon = panelOptions.Icon or "settings"
     local tabName = panelOptions.TabName or ""
     local tabIcon = panelOptions.TabIcon or "save"
@@ -10333,3 +10496,5 @@ if not libraryChunkOk then
 end
 
 return if libraryChunkOk then libraryChunkResult else nil
+
+
